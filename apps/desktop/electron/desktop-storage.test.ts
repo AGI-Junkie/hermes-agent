@@ -57,6 +57,45 @@ describe('scanStorage', () => {
 
     expect(summary.truncated).toBe(true)
   })
+
+  it('stops a flat folder at the entry budget instead of reading every file', async () => {
+    fs.mkdirSync(path.join(root, 'flat'))
+
+    for (let i = 0; i < 200; i += 1) {
+      fs.writeFileSync(path.join(root, 'flat', `${i}.txt`), 'x')
+    }
+
+    const summary = await scanStorage(root, { maxEntries: 20 })
+
+    expect(summary.truncated).toBe(true)
+    // One byte per file: admitting no more than the budget bounds the total.
+    expect(summary.totalBytes).toBeLessThanOrEqual(20)
+  })
+
+  it('stops a flat scanned folder at the budget too', async () => {
+    for (let i = 0; i < 200; i += 1) {
+      fs.writeFileSync(path.join(root, `${i}.txt`), 'x')
+    }
+
+    const summary = await scanStorage(root, { maxEntries: 20 })
+
+    expect(summary.truncated).toBe(true)
+    expect(summary.entries.length).toBeLessThanOrEqual(20)
+  })
+
+  it('stops at the time budget', async () => {
+    fs.mkdirSync(path.join(root, 'a', 'b'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'a', 'b', 'f.txt'), 'x')
+
+    expect((await scanStorage(root, { maxMs: -1 })).truncated).toBe(true)
+  })
+
+  it('does not report truncation when everything fits', async () => {
+    fs.mkdirSync(path.join(root, 'a'))
+    fs.writeFileSync(path.join(root, 'a', 'f.txt'), 'x')
+
+    expect((await scanStorage(root)).truncated).toBe(false)
+  })
 })
 
 describe('registerDesktopStorageIpc', () => {

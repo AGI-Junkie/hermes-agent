@@ -39,56 +39,56 @@ export function StorageSection(): ReactElement | null {
   // Rescan throws them away, because sizes can have changed since.
   const cache = useRef(new Map<string, DesktopStorageSummary>())
 
-  const scan = useCallback(
-    (force = false): (() => void) => {
-    const key: string = JSON.stringify(trail)
-    const cached: DesktopStorageSummary | undefined = force ? undefined : cache.current.get(key)
+  // Every scan takes a number; only the newest one may touch state or the cache.
+  // A scan that finishes after the user rescanned or moved on is dropped, so an
+  // old folder's rows never land under a newer heading.
+  const latestScan = useRef(0)
 
-    if (cached) {
-      setSummary(cached)
-      setLoading(false)
+  const scan = useCallback(
+    (force = false): void => {
+      const key: string = JSON.stringify(trail)
+      const id: number = ++latestScan.current
+      const cached: DesktopStorageSummary | undefined = force ? undefined : cache.current.get(key)
+
+      if (cached) {
+        setSummary(cached)
+        setLoading(false)
+        setFailed(false)
+
+        return
+      }
+
+      if (force) {
+        cache.current.clear()
+      }
+
+      setLoading(true)
       setFailed(false)
 
-      return (): void => undefined
-    }
-
-    if (force) {
-      cache.current.clear()
-    }
-
-    let alive = true
-
-    setLoading(true)
-    setFailed(false)
-
-    void bridge
-      ?.summary(trail)
-      .then((result: DesktopStorageSummary): void => {
-        cache.current.set(key, result)
-
-        if (alive) {
-          setSummary(result)
-        }
-      })
-      .catch((): void => {
-        if (alive) {
-          setFailed(true)
-        }
-      })
-      .finally((): void => {
-        if (alive) {
-          setLoading(false)
-        }
-      })
-
-    return (): void => {
-      alive = false
-    }
+      void bridge
+        ?.summary(trail)
+        .then((result: DesktopStorageSummary): void => {
+          if (id === latestScan.current) {
+            cache.current.set(key, result)
+            setSummary(result)
+          }
+        })
+        .catch((): void => {
+          if (id === latestScan.current) {
+            setFailed(true)
+          }
+        })
+        .finally((): void => {
+          if (id === latestScan.current) {
+            setLoading(false)
+          }
+        })
     },
     [bridge, trail]
   )
 
-  useEffect((): (() => void) => scan(), [scan])
+  // Opening another folder runs a newer scan, which retires the one in flight.
+  useEffect((): void => scan(), [scan])
 
   if (!bridge) {
     return null
@@ -160,7 +160,8 @@ export function StorageSection(): ReactElement | null {
                 key={entry.name}
                 onClick={(): void => open(entry)}
                 onKeyDown={(event): void => {
-                  if (event.key === 'Enter') {
+                  // Keys from the icon button bubble up here; only the row itself opens.
+                  if (event.key === 'Enter' && event.target === event.currentTarget) {
                     open(entry)
                   }
                 }}
